@@ -7,7 +7,7 @@ A Faster Heuristic for the Turnpike Problem with Measurement Uncertainty
 - C++ Dependencies: cmake, Boost, Eigen
 
 - Python3.10+
-- Python Dependencies: PyBind11, SciPy, 
+- Python Dependencies: PyBind11, SciPy
 
 # Instructions
 The TurnpikeMM library must be compiled first. To compile:
