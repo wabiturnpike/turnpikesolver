@@ -1,215 +1,473 @@
-#include <random>
-#include <Eigen/Core>
-#include <boost/sort/sort.hpp>
+import numpy as np
+import scipy.linalg as la
+import scipy.sparse as sp
+import scipy.sparse.linalg as sla
 
-#include <pybind11/stl.h>
-#include <pybind11/eigen.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
+import TurnpikeMM as MM
+import turnpike_utils as utils
 
-using Vector = Eigen::VectorXd;
-using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
-
-namespace py = pybind11;
-
-py::object eigen_to_scipy_sparse(const SparseMatrix& matrix) {
-    py::module scipy_sparse = py::module::import("scipy.sparse");
-
-    // Get the CSR representation of the Eigen sparse matrix
-    Eigen::SparseMatrix<double, Eigen::RowMajor> csr_matrix = matrix;
-    csr_matrix.makeCompressed();
-
-    // Create the data, indices, and indptr arrays for the Scipy CSR matrix
-    py::array_t<double> data(csr_matrix.nonZeros(), csr_matrix.valuePtr());
-    py::array_t<int> indices(csr_matrix.nonZeros(), csr_matrix.innerIndexPtr());
-    py::array_t<int> indptr(csr_matrix.outerSize() + 1, csr_matrix.outerIndexPtr());
-
-    // Call the scipy.sparse.csr_matrix constructor
-    py::object csr_class = scipy_sparse.attr("csr_matrix");
-    return csr_class(py::make_tuple(data, indices, indptr), py::arg("shape") = py::make_tuple(csr_matrix.rows(), csr_matrix.cols()));
-}
-
-std::pair<int, int> get_row_col(int k) {
-    /* Linearizes triangular matrix indices
-     * Examples: k = 0 --> (0, 1), k = 1 --> (0, 2), k = 2 --> (1, 2),
-     *           k = 3 --> (0, 3), k = 4 --> (1, 3), k = 5 --> (2, 3)
-     */
-
-    // Solve quadratic for (i, j) in k = j choose 2 + i
-    int j = static_cast<int>(std::sqrt(2. * k + .25) - .5) + 1;
-    int i = k - (j * j - j) / 2;
-
-    return {i, j};
-}
-
-SparseMatrix build_incidence_matrix(const long n) {
-    const long m{(n * n - n) / 2};
-
-    // Signed incidence matrix for complete graph
-    // Sparsity: 2m entries over n columns with n-1 non-zeros in each
-    SparseMatrix Q(m, n);
-    Q.reserve(Eigen::VectorXi::Constant(m, 2));
-
-#pragma omp parallel for default(none) shared(Q, m)
-    for (int k = 0; k < m; ++k) {
-        const auto [i, j] = get_row_col(k);
-        Q.insert(k, i) = -1;
-        Q.insert(k, j) =  1;
-    }
-
-    Q.makeCompressed();
-
-    return Q;
-}
-
-std::tuple<double, py::array_t<int>> online_matching(const py::array_t<double> &D_np,
-                                                     const py::array_t<double> &Δ_np,
-                                                     py::array_t<int> &I_np,
-                                                     int idx) {
-    // Get the underlying pointers to the NumPy array data
-    int *I = I_np.mutable_data();
-    const double *D = D_np.data();
-    const double *Δ = Δ_np.data();
-
-    // Compute matching…
-    double cost = 0.;
-    int m = static_cast<int>(D_np.size());
-    int n = static_cast<int>(Δ_np.size());
-    for (int k = 0; k < n; ++k) {
-        int p = static_cast<int>(std::lower_bound(D, D + m, Δ[k]) - D);
-
-        int i = std::max(0, p-1);
-        int j = std::min(p, m-1);
-
-        while (i > 0 && I[i] != -1) i -= 1;
-        while (j < m && I[j] != -1) j += 1;
-
-        if (j == m) {
-            I[i] = k + idx;
-            cost += Δ[k] - D[i];
-        } else {
-            double di = Δ[k] - D[i];
-            double dj = D[j] - Δ[k];
-
-            if (I[i] == -1 && di < dj) {
-                I[i] = k + idx;
-                cost += di;
-            } else {
-                I[j] = k + idx;
-                cost += dj;
-            }
-        }
-    }
-
-    return std::make_tuple(cost, I_np);
-}
-
-double match_distances(py::array_t<double> &dhat, const py::array_t<double> &d, int threads) {
-    // Static permutation for likely case that this is called many times on the same size
-    static std::vector<int> permutation;
-    permutation.resize(d.size());
-
-    // Fill with identity permutation
-    std::iota(permutation.begin(), permutation.end(), 0);
+from MM_utils import MM_optimizer
 
 
-    // Perform an argsort on the permutation array
-    const double *dhat_arr = dhat.data();
+class TurnpikeSolver:
+    def __init__(self, n: int, verbose: int = 0):
+        """
+            @param n: int, number of points, used to optimize space usage
+            @param verbose: int in {0, 1, 2}, more messages will be printed at each level
+        """
 
-    if (threads > 1) {
-        boost::sort::sample_sort(permutation.begin(), permutation.end(), [&dhat_arr](int i, int j) {
-            return dhat_arr[i] < dhat_arr[j];
-        }, threads);
-    } else {
-        boost::sort::spinsort(permutation.begin(), permutation.end(), [&dhat_arr](int i, int j) {
-            return dhat_arr[i] < dhat_arr[j];
-        });
-    }
+        assert isinstance(n, int) and n > 0, "number of points must be a positive integer"
 
-    // Applies the inverse permutation Πᵀ
-    double cost = 0.;
-    const double *darr = d.data();
-    double *dhat_write = dhat.mutable_data();
-    for (std::size_t i = 0; i < permutation.size(); ++i) {
-        cost += std::abs(dhat_write[permutation[i]] - darr[i]);
-        dhat_write[permutation[i]] = darr[i];
-    }
+        self.projector = None
+        self.Q = utils.QMatrix(n)
 
-    return cost;
-}
+        # cvxpy solver and size index
+        self.idx = 0
 
-PYBIND11_MODULE(TurnpikeMM, m) {
-    m.doc() = "MM TurnpikeSolver utilities implemented in C++ for vectorization and true parallelism.";
+        # Placed distances, backtracking matrix, and solution vector
+        self.Δ, self.P, self.b = None, None, None
 
-    m.def("Qz", [](const py::array_t<double> &z, py::array_t<double> &d) {
-        if (z.ndim() != 1 || d.ndim() != 1)
-            throw std::runtime_error("Both input arrays must be 1-dimensional.");
+        # Solver instance specific variables, subject to change without warning
+        self.values = None
 
-        const auto n = z.size();
-        const auto m = d.size();
+        self.verbose = verbose
+        self.n, self.m = n, utils.choose2(n)
 
-        if (m != (n * n - n) / 2)
-            throw std::runtime_error("The size of array d must be choose2(z.size).");
+    def __repr__(self):
+        n, verbose = self.n, self.verbose
+        return f'TurnpikeSolver({n=}, {verbose=})'
 
-        auto zdata = z.data();
-        auto ddata = d.mutable_data();
-        for (auto k = 0; k < m; ++k) {
-            const auto [i, j] = get_row_col(k);
-            ddata[k] = zdata[j] - zdata[i];
-        }
+    def solve(self, distances: np.ndarray, ϵ: float, z_init: np.ndarray, MM_its: int = 10) -> np.ndarray:
+        """
+            Solves Turnpike instances with an EM-augmented backtracking algorithm.
 
-        return py::none();
-    }, py::arg("z"), py::arg("out"), "Compute Qz and store the result in d.");
+            @param distances: non-negative float array with n choose 2 entries
+            @param ϵ: non-negative float, tolerance for fuzzy distance matching
+            @param z_init: numpy array, used as the initializer for the MM steps
+            @param MM_its: non-negative integer, number of iterations to run the MM initializer
 
-    m.def("dQ", [](const py::array_t<double> &d, py::array_t<double> &z) {
-        if (z.ndim() != 1 || d.ndim() != 1)
-            throw std::runtime_error("Both input arrays must be 1-dimensional.");
+            @returns: matching graph, quality score, z
+        """
 
-        const auto n = z.size();
-        const auto m = d.size();
+        assert z_init.size == self.n, "initializer must be the same size"
 
-        if (m != (n * n - n) / 2)
-            throw std::runtime_error("The size of array d must be choose2(z.size).");
+        # Must be 64 bit precision to avoid numerical bugs
+        D = distances.astype(np.float64)
+        D.sort()
 
-        auto ddata = d.data();
-        auto zdata = z.mutable_data();
+        self.projector = utils.DistanceProjector(D)
 
-        std::fill(zdata, zdata + n, 0.);
+        self.idx = 0
+        m, n, values = self.m, self.n, dict()
 
-        for (int k = 0; k < m; ++k) {
-            const auto [i, j] = get_row_col(k);
-            zdata[i] -= ddata[k];
-            zdata[j] += ddata[k];
-        }
+        # Implicit storage of an interval sparse matrix
+        self.L = np.empty(m, dtype=np.int32)
+        self.R = np.empty(m, dtype=np.int32)
+        self.Δ = np.empty(m, dtype=np.float64)
+        self.I = np.full(m, -1, dtype=np.int32)
+        self.T = np.empty(n, dtype=np.float64)
 
-        return py::none();
-    }, py::arg("d"), py::arg("z"), "Compute dQ and store the result in z.");
+        # Temporary variables for this call to solver
+        # Subject to change without warning
+        values['ϵ'] = ϵ
+        values['D'] = D
+        values['l1'] = D.sum()
+        values['l2'] = la.norm(D)
+        values['branch_count'] = 0
 
-    m.def("match_distances", [](py::array_t<double> &dhat_array, const py::array_t<double> &d, int threads) {
-        if (threads == -1) threads = omp_get_max_threads();
+        values['step'] = utils.step_vector(n)
+        values['ds'] = la.norm(values['step']) ** 2
 
-        // Call the match_distances function
-        return match_distances(dhat_array, d, threads);
-    }, py::arg("dhat"), py::arg("d"), py::arg("threads") = -1, "Replace dhat with the equivalently ordered entries in d.");
+        # Distances from z1 and zn
+        # np.inf represents an unmatched piece
+        values['dzn'] = np.full(n, np.inf)
+        values['dz1'] = np.full(n, np.inf)
 
-    m.def("build_sparse_matrix", [](int n, int threads) {
-        if (threads == -1) threads = omp_get_max_threads();
-        omp_set_num_threads(threads);
-        Eigen::setNbThreads(threads);
+        # Initial MM guess subject to symmetry-breaking constraints
 
-        const auto Q = build_incidence_matrix(n);
-        return eigen_to_scipy_sparse(Q);
-    }, py::arg("n"), py::arg("threads") = -1);
+        zhat = z_init.copy()
 
-    m.def("online_matching", &online_matching, "Computes the matching cost and assignment vector",
-          py::arg("D"), py::arg("Δ"), py::arg("I"), py::arg("idx"));
+        self.projector.project(zhat)
+        if self.verbose:
+            print('Running MM setup…')
 
-    m.def("undo_matching", [](py::array_t<int> &I, int a) {
-        auto m = I.size();
+        values['Z'] = MM_optimizer(D, ϵ=ϵ, verbose=False, zhat=zhat, its=MM_its)
 
-        int *arr = I.mutable_data();
-        for (decltype(m) k = 0; k < m; ++k) {
-            if (arr[k] >= a) arr[k] = -1;
-        }
-    }, "undo all matching between a and b", py::arg("I"), py::arg("a"));
-}
+        values['best_Z'] = values['Z']
+        values['r'] = values['l2'] / np.sqrt(n)
+
+        # Corner case: must place zn - z1 here
+        values['dzn'][-1] = 0.
+        values['dzn'][ 0] = D[-1]
+
+        values['dz1'][ 0] = 0.
+        values['dz1'][-1] = D[-1]
+
+        self.values = values
+
+        values['cost'] = 0.
+        values['best_score'] = np.inf
+
+        self.match_distances(
+            np.asarray([D[-1]]),
+            np.asarray([D[-1] - ϵ]),
+            np.asarray([D[-1] + ϵ]),
+        )
+
+        self.T[ 0] = 1.
+        self.T[-1] = ϵ
+        self.backtrackMM(i=1, j=n-2, ϵ=ϵ)
+
+        z, dz1, dzn = values['Z'], values['dz1'], values['dzn']
+
+        # Solve Pz = b for the least-squares solution using the backtracked vectors
+        # This is advantageous in the noisy case because it helps evens out bad choices.
+        # The vector T stores the confidence radius when a distance was placed and allows
+        # us to scale vectors to solve weighted least squares.
+
+        # Scale by stepping by confidence.
+        # This term dominates the magnitude otherwise.
+        sz = values['l1']
+        sv = utils.step_vector(n)
+
+        self.P, self.b = sp.lil_array((n, n), dtype=np.float64), dz1.copy()
+        K, P, b = range(1, n), self.P, self.b
+
+        T = self.T
+        T[1:] /= ϵ
+        T **= -.5
+
+        P[0] = sv
+        b[0] = sz
+        P[K, 0] = -1
+        P[K, K] =  1
+
+        zhat = sla.lsqr(P, b, atol=1e-12, btol=1e-12)[0]
+        zhat = utils.fix_reflection(zhat)
+
+        self.projector.project(zhat, its=100 * self.n)
+
+        return zhat, dz1, dzn
+
+    def backtrackMM(self, i: int, j: int, ϵ: float):
+        """
+            Performs incidence-backtracking with an MM-step deciding which split to take.
+
+            @param i: int, gives the range Dn[:i] currently assigned
+            @param j: int, gives the range D1[j+1:] currently assigned
+            @param ϵ: float, noise tolerance radius for assigning distance
+
+            @returns: an MM reconstruction subject to solver constraints
+        """
+
+        if i > j:
+            return i, j
+
+        m, n, values = self.m, self.n, self.values
+        D, dzn, dz1 = values['D'], values['dzn'], values['dz1']
+        dr = D[-1]
+
+        idx, d = m, None
+        while d is None and (idx := idx - 1) >= 0:
+            if self.I[idx] == -1:
+                d = D[idx]
+
+        τ = values['ϵ']
+        tols = [ϵ] + [ϵ + (τ / 8.), ϵ + (τ / 4.)]
+
+        τ = ϵ
+        for ϵ in tols:
+            # Branch 1 params
+            one = [i, d, dr - d, 2 * ϵ, 3 * ϵ, 1, 0]
+
+            # Branch 2 params
+            two = [j, dr - d, d, 3 * ϵ, 2 * ϵ, 0, 1]
+
+            # Test branch dmax = zn - zi
+            dzn[i], dz1[i] = d, dr - d
+            z1, score1 = self.back_and_forth((i, n-1), d)
+            one.append(score1)
+            one.append(z1)
+            dz1[i], dzn[i] = np.inf, np.inf
+
+            # Test branch dmax = zj - z1
+            dz1[j], dzn[j] = d, dr - d
+            z2, score2 = self.back_and_forth((0, j), d)
+            two.append(score2)
+            two.append(z2)
+            dzn[j], dz1[j] = np.inf, np.inf
+
+            # Search in order of MM scores
+            if score2 < score1:
+                one, two = two, one
+                score1, score2 = score2, score1
+
+            if self.verbose > 0:
+                print(
+                    f'placed={d:.6f}, i={i}, j={j}, tol={ϵ}, '
+                    f'match-cost={values["cost"] / utils.choose2(i + (n-j))}, '
+                    f'MAE={np.nanmin([score1, score2]) / m:.8f}, '
+                    f'best={values["best_score"] / m}'
+                )
+
+            zorg = values['Z']
+            for idx, dn, d1, ϵn, ϵ1, Δi, Δj, score, z in (one, two):
+                # MM found an invalid branch
+                if np.isnan(score):
+                    continue
+
+                # Required distances within tolerance
+                δ = np.hstack([dzn[:i] - dn, dz1[j + 1:] - d1])
+                δlo = δ.copy()
+                δhi = δ.copy()
+
+                # Error propagates differently when we place the distance from the perspective of z1 or zn.
+                # For example, if we placed distance zn - z3 earlier and are placing zn - z4 now,
+                # then zn - z3 - (zn - z4) = z4 - z3 subject to a 2ϵ noise bound.
+                # On the other hand, if we placed distance z3 - z1 earlier, we have to convert that distance via
+                # (zn - z1) - (zn - z4) = (z4 - z1) - (z3 - z1) = z4 - z3 subject to a 3ϵ noise bound
+                δlo[:i] -= ϵn
+                δlo[i:] -= ϵ1
+
+                δhi[:i] += ϵn
+                δhi[i:] += ϵ1
+
+                # Find a minimizing match within tolerances
+                M = self.match_distances(δ, δlo, δhi)
+
+                # Matching failed--try the other branch
+                if not M:
+                    continue
+
+                values['branch_count'] += 1
+
+                μ, I, *_ = M
+                values['cost'] += μ
+                μ = values['cost'] / utils.choose2(δ.size)
+
+                dz1[idx] = d1
+                dzn[idx] = dn
+                values['Z'] = z
+
+                # Convex factor to
+                # increase tolerance early in the tree,
+                # maintain tolerance midway in the tree,
+                # increase tolerance late in the tree.
+                # ξ = values['ϵ'] * abs((utils.choose2(δ.size + 1) / m) - .5) ** 1.5
+
+                # Use matching cost mean to scale new error propagation
+                self.T[idx] = τ
+                reconstructed = self.backtrackMM(i + Δi,
+                                                 j - Δj,
+                                                 ϵ)
+
+                if reconstructed:
+                    ri, rj = reconstructed
+                    if ri > rj:
+                        return i, j
+
+                    return reconstructed
+
+                t = utils.choose2(δ.size)
+                MM.undo_matching(I, t)
+
+                values['Z'] = zorg
+                dzn[idx] = np.inf
+                dz1[idx] = np.inf
+
+        return False
+
+    def match_distances(self, δ: np.ndarray, δlo: np.ndarray, δhi: np.ndarray):
+        """
+            Adds distance estimates to matching graph and finds a weight-minimizing assignment based
+            on most recently matched ground distance d.
+
+            @param   δ: interval centers estimated from d, dz1, and dzn.
+            @param δlo: interval lower-bounds estimated from δ, dz1, and dzn
+            @param δhi: interval upper-bounds estimated from δ, dz1, and dzn
+        """
+
+        if self.verbose == 2:
+            print('Matching...')
+
+        ϵ, m, D = self.values['ϵ'], self.m, self.values['D']
+
+        matched = utils.choose2(δ.size)
+        Δ, L, R, I = self.Δ, self.L, self.R, self.I
+
+        # We find edges by:
+        # --- 1. Binary searching for lower bound on matching
+        # --- 2. Binary searching for upper bound on matching
+        # --- 3. Constructing edges between every ground distances in the bounds
+        # --- 4. Adding edge weights based on |ground - estimate|
+        E = matched + δ.size
+        L[matched:E] = np.searchsorted(D, δlo, side='left')
+        R[matched:E] = np.searchsorted(D, δhi, side='right')
+
+        if np.any(L[matched:E] == R[matched:E]):
+            return False
+
+        Δ[matched:E] = δ
+        cost, I = MM.online_matching(D, δ, I, matched)
+
+        if cost == np.inf:
+            print('Infinite cost!')
+            return False
+
+        return cost, I
+
+    def back_and_forth(self, constraint: tuple[int, int],
+                       value: float) -> tuple[np.ndarray, float]:
+        """
+            @param constraint: index tuple, (i, j) with i < j indicating z[j] - z[i] = value
+            @param value: float, constraint value to enforce
+
+            @returns: MM estimate for the point vector, sorted-l1-distance-residual
+        """
+
+        if self.verbose == 2:
+            print('Optimizing...')
+
+        values = self.values
+        D, Z = values['D'], values['Z'].copy()
+
+        step = values['step']
+
+        # Derived symmetry-breakers
+        r, d1, ds, dmax = values['r'], values['l1'], values['ds'], D[-1]
+
+        r = values['r']
+        i, j = constraint
+
+        Dhat = np.empty(self.m)
+        for _ in range(3):
+            # Step 0: calculate distances
+            MM.Qz(Z, Dhat)
+
+            # Step 1: optimize permutation
+            MM.match_distances(Dhat, D, 10)
+
+            # Step 2: optimize point vector
+            MM.dQ(Dhat, Z)
+            utils.normalize(Z, r)
+
+            # Step 3: constraint enforcement
+            # --- 1. Sorting constraint
+            # --- 2. Stepping constraint
+            # --- 3. Reflection constraint
+            # --- 4. l2-norm constraint
+            # --- 5. new dij constraint
+            Z.sort()
+
+            ps = (d1 - (step @ Z)) / ds
+            utils.normalize(
+                np.add(Z, ps * step, out=Z), r
+            )
+
+            Z = utils.normalize(Z, r)
+
+            for _ in range(20):
+                Z.sort()
+
+                rij = value - (Z[j] - Z[i])
+                Z[i] -= rij / 2.
+                Z[j] += rij / 2.
+
+                ps = (d1 - (step @ Z)) / ds
+                utils.normalize(
+                    np.add(Z, ps * step, out=Z), r
+                )
+
+                Z = utils.normalize(Z, r)
+
+        if self.verbose == 2:
+            print('Done optimizing!')
+
+        MM.match_distances(Dhat, D)
+        score = la.norm(np.subtract(Dhat, D, out=Dhat), ord=1)
+
+        if score < values['best_score']:
+            values['best_Z'] = Z
+            values['best_score'] = score
+
+        return Z, score
+
+
+if __name__ == '__main__':
+    np.random.seed(1)
+
+    BIN_TOL, BIN_EPS, MAE, MSE, MAX = [], [], [], [], []
+
+    ϵs = np.asarray([
+        # 1e-11, 1e-10, 1e-9, 1e-8, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4,
+        1e-6
+        # 1e-3, 1e-2
+    ])
+
+    σs = ϵs
+    τs = ϵs
+
+    # Small tolerance for noiseless setting
+    # τs[0] = 1e-15
+    n = 500
+    m = utils.choose2(n)
+
+    Q = utils.QMatrix(n)
+    # z = utils.canonical_vector(n, distribution=lambda k: np.random.uniform(0, 1, k))
+    points = np.arange(3 * n)
+
+    np.random.shuffle(points)
+    z = np.random.choice(points, size=n, replace=False).astype(np.float64)
+    z.sort()
+    z -= z[ 0]
+    z /= z[-1]
+    z = utils.fix_reflection(z - z.mean())
+
+    d = Q @ z
+    d.sort()
+    for σ, τ in zip(σs, τs):
+        print(σ, τ)
+
+        # Add centered Gaussian noise with stddev σ
+        noise = np.random.randn(d.size)
+        noise = np.multiply(σ, noise, out=noise)
+
+        # Add Gaussian noise to the distances
+        dnoise = np.add(d, noise, out=noise)
+        dnoise.sort()
+
+        # Run solver within 5 standard-deviations tolerance of noise
+        # Tradeoff with tolerance between runtime and performance
+        # Verbose toggles debugging messages.
+        solver = TurnpikeSolver(n, verbose=1)
+
+        # Solve with tolerance value τ
+        zo, dz1, dzn = solver.solve(dnoise, 1e-5, utils.canonical_vector(n))
+        z1 = dz1 - dz1.mean()
+
+        P = utils.DistanceProjector(dnoise)
+        zo, z1 = utils.fix_reflection(zo), utils.fix_reflection(z1)
+
+        labels = ('Solver', 'Z[0] Distances')
+        for label, zinit in zip(labels, (zo, z1)):
+            print(f'{label} zhat')
+
+            zopt = MM_optimizer(dnoise, ϵ=1e-12, ground=z,
+                                zhat=zinit.copy(), verbose=False)
+
+            for zhat in (zinit, zopt):
+                R = np.abs(z - zhat)
+
+                MAX.append(np.max(R))
+
+                BIN_EPS.append(np.sum(R < σ))
+                BIN_TOL.append(np.sum(R < 10 * σ))
+
+                MSE.append(la.norm(R) ** 2 / n)
+                MAE.append(la.norm(R, ord=1) / n)
+
+                print(f'Binned by tolerance: {BIN_TOL[-1]}, '
+                      f'Binned by standard deviation: {BIN_EPS[-1]}, '
+                      f'MAE: {MAE[-1]}, MSE: {MSE[-1]}, MAX: {MAX[-1]}')
+
+            print()
