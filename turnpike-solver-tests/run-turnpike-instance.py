@@ -1,3 +1,4 @@
+import os
 import worker
 import argparse
 import numpy as np
@@ -8,34 +9,33 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process some integers and a distribution type.")
 
     parser.add_argument("n", type=int, help="specify the number of points")
-    parser.add_argument("k", type=int, help="specify uncertainty level 1e-k")
+    parser.add_argument("low", type=int, help="specify uncertainty level 1e-k low")
+    parser.add_argument("high", type=int, help="specify uncertainty level 1e-k high")
 
-    parser.add_argument("--distribution", type=str, choices=["normal", "uniform", "cauchy"],
+    parser.add_argument("--distribution", type=str, choices=["all", "normal", "uniform", "cauchy"],
                         default="normal", help="distribution type--one of normal, uniform, or cauchy")
 
     parser.add_argument("--samples", type=int, default=1, help="number of samples to draw and simulate")
     parser.add_argument("--seed", type=int, default=1, help="RNG seed passed to np.random.seed")
-    parser.add_argument("--out", type=str, default=None, help="location to write out run csv")
+
+    parser.add_argument('--out', type=str, default=None, help='directory for result csv, no file written if None')
 
     args = parser.parse_args()
 
-    n, ϵ = args.n, 10 ** (-args.k)
+    dists = (stats.cauchy().rvs,
+             stats.norm().rvs,
+             stats.uniform().rvs)
+    labels = ('cauchy', 'normal', 'uniform')
 
-    match args.distribution:
-        case 'cauchy':
-            draw = stats.cauchy().rvs
-        case 'normal':
-            draw = stats.norm().rvs
-        case 'uniform':
-            draw = stats.uniform().rvs
-        case _:
-            raise RuntimeError("Invalid distribution.")
+    for k in range(args.low, args.high):
+        ϵ = 10 ** (-k)
 
-    np.random.seed(args.seed)
-    out = pd.DataFrame(
-        worker.run_experiment(n, ϵ, draw, args.samples, verbose=False)[-1]
-    )
+        for dist, label in zip(dists, labels):
+            if args.distribution in ('all', label):
+                out = pd.DataFrame(worker.run_experiment(
+                    args.n, ϵ, dist, samples=args.samples, verbose=True
+                ))
 
-    if args.out is not None:
-        out.to_csv(args.out)
-
+                out.to_csv(
+                    os.path.join(args.out, f'{label}_{args.n}_{k}.csv')
+                )
