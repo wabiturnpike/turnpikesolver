@@ -3,7 +3,7 @@ This repository contains data and script for reproducing results in the followin
 A Faster Heuristic for the Turnpike Problem with Measurement Uncertainty
 
 # Requirements
-- C++17 or above
+- C++ 20+
 - C++ Dependencies: cmake, Boost, Eigen
 
 - Python3.10+
