@@ -19,16 +19,5 @@ Once you have the prerequisites installed, follow these steps to set up the Turn
 <pre><code id="codeBlock">
 cd TurnpikeMM
 </code></pre>
-<script>
-document.getElementById('copyButton').addEventListener('click', function() {
-  const codeBlock = document.getElementById('codeBlock');
-  const textArea = document.createElement('textarea');
-  textArea.value = codeBlock.innerText;
-  document.body.appendChild(textArea);
-  textArea.select();
-  document.execCommand('copy');
-  textArea.remove();
-});
-</script>
 
 
