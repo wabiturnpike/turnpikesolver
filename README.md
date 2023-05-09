@@ -55,7 +55,9 @@ You only need two things to use the solver: a distance set and a rough estimate 
 To solve a Turnpike instance,
 
 <button id="copyButton"></button>
-<pre><code id="codeBlock"> from worker import solve \n z = solve(d, uncertainty)</code></pre>
+<pre><code id="codeBlock"> 
+from worker import solve 
+z = solve(d, uncertainty)</code></pre>
 
 The vector z is the method's point vector estimate. It satisfies the symmetry-breaking constraints detailed in the paper.
 
