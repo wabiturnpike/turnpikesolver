@@ -12,7 +12,7 @@ This repository contains the code implementation for the paper *A Much Faster He
 For macOS users with [Homebrew](https://brew.sh), Boost and Eigen can be installed with:
 
 <button id="copyButton">Copy</button>
-<pre><code id="codeBlock"brew install boost
+<pre><code id="codeBlock">brew install boost
 brew install eigen
 </code></pre>
 
