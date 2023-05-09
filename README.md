@@ -17,5 +17,9 @@ Once you have the prerequisites installed, follow these steps to set up the Turn
 2. Change directory to TurnpikeMM:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> cd TurnpikeMM </code></pre>
+3. Install the Python package:
+<button id="copyButton"></button>
+<pre><code id="codeBlock"> python3.10 -m pip install -e . </code></pre>
+
 
 
