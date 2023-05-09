@@ -20,10 +20,10 @@ def find_include(lib: str):
             return eigen_path
     raise RuntimeError(f'{lib} library not found. Please install {lib} and make sure it is in a standard include path.')
 
-
+    
+boost_include_dir = find_include('boost')
 eigen_include_dir = find_include('eigen3')
-boost_include_dir = '/usr/local/Cellar/boost/1.81.0_1/include'
-boost_library_dir = '/usr/local/Cellar/boost/1.81.0_1/lib'
+
 
 ext_modules = [
     Extension(
