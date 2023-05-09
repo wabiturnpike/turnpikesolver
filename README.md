@@ -16,8 +16,6 @@ Once you have the prerequisites installed, follow these steps to set up the Turn
 1. Open a terminal and navigate to the root directory of the TurnpikeMM repository.
 2. Change directory to the TurnpikeMM subfolder:
 <button id="copyButton"></button>
-<pre><code id="codeBlock">
-cd TurnpikeMM
-</code></pre>
+<pre><code id="codeBlock"> cd TurnpikeMM </code></pre>
 
 
