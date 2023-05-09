@@ -9,14 +9,14 @@ This repository contains the code implementation for the paper *A Much Faster He
 3. **Boost**: Download and install the most recent version of the [Boost C++ Libraries](https://www.boost.org/users/download/).
 4. **Eigen**: Download and install the most recent version of the [Eigen C++ Library](http://eigen.tuxfamily.org/index.php?title=Main_Page#Download).
 
-For macOS users with [Homebrew](https://brew.sh):
+For macOS users with [Homebrew](https://brew.sh), Boost and Eigen can be installed with:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> 
 brew install boost
 brew install eigen
 </code></pre>
 
-For Ubuntu users:
+For Ubuntu users, Boost and Eigen can be installed with:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> 
 sudo apt-get update
