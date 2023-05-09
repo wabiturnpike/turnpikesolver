@@ -11,14 +11,14 @@ This repository contains the code implementation for the paper *A Much Faster He
 
 For macOS users with [Homebrew](https://brew.sh), Boost and Eigen can be installed with:
 
-<button id="copyButton">Copy</button>
+<button id="copyButton"></button>
 <pre><code id="codeBlock">brew install boost
 brew install eigen
 </code></pre>
 
 For Ubuntu users, Boost and Eigen can be installed with:
 
-<button id="copyButton">Copy</button>
+<button id="copyButton"></button>
 <pre><code id="codeBlock">sudo apt-get update
 sudo apt-get install libeigen3-dev
 sudo apt-get install libboost-all-dev
@@ -56,7 +56,7 @@ You only need one thing to use the solver: a distance set. It is helpful to have
 
 To solve a Turnpike instance,
 
-<button id="copyButton">Copy</button>
+<button id="copyButton"></button>
 <pre><code id="codeBlock">from TurnpikeMM.worker import solve 
 z = solve(d, uncertainty)
 </code></pre>
