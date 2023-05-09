@@ -21,6 +21,7 @@ For Ubuntu users:
 <pre><code id="codeBlock"> 
 sudo apt-get update
 sudo apt-get install libeigen3-dev
+sudo apt-get install libboost-all-dev
 </code></pre>
 
 ## Installation
