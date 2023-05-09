@@ -20,6 +20,10 @@ Once you have the prerequisites installed, follow these steps to set up the Turn
 3. Install the Python package:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> python3.10 -m pip install -e . </code></pre>
+4. Go back to the root directory and change directory to turnpike-solver-tests:
+<button id="copyButton"></button>
+<pre><code id="codeBlock"> cd ../turnpike-solver-tests </code></pre>
+
 
 
 
