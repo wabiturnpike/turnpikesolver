@@ -1,6 +1,6 @@
 # TurnpikeMM: A Paper's Code Repository
 
-This repository contains the code implementation for the *TurnpikeMM* paper. It provides a step-by-step guide on how to set up your environment, compile the required dependencies, and execute the tests. Follow the instructions below to get started.
+This repository contains the code implementation for the paper *A Much Faster Heuristic for Turnpike Problem with Measurement Uncertainty*. It provides a step-by-step guide on how to set up your environment, compile the required dependencies, and execute the tests. Follow the instructions below to get started.
 
 ## Prerequisites
 
