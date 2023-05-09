@@ -14,5 +14,22 @@ This repository contains the code implementation for the paper *A Much Faster He
 Once you have the prerequisites installed, follow these steps to set up the TurnpikeMM project:
 
 1. Open a terminal and navigate to the root directory of the TurnpikeMM repository.
-2. Change directory to the TurnpikeMM subfolder: ```cd TurnpikeMM```
+2. Change directory to the TurnpikeMM subfolder:
+
+<button id="copyButton">Copy</button>
+<pre><code id="codeBlock">
+cd TurnpikeMM
+</code></pre>
+<script>
+document.getElementById('copyButton').addEventListener('click', function() {
+  const codeBlock = document.getElementById('codeBlock');
+  const textArea = document.createElement('textarea');
+  textArea.value = codeBlock.innerText;
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand('copy');
+  textArea.remove();
+});
+</script>
+
 
