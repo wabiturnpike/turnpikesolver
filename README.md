@@ -14,5 +14,5 @@ This repository contains the code implementation for the paper *A Much Faster He
 Once you have the prerequisites installed, follow these steps to set up the TurnpikeMM project:
 
 1. Open a terminal and navigate to the root directory of the TurnpikeMM repository.
-2. Change directory to the `TurnpikeMM` subfolder: `cd TurnpikeMM`
+2. Change directory to the TurnpikeMM subfolder: ```cd TurnpikeMM```
 
