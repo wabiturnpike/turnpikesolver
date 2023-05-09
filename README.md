@@ -45,5 +45,5 @@ from worker import solve
 z = solve(d, uncertainty)
 </code></pre>
 
-The vector z will hold the method's point vector estimate filling the symmetry-breaking constraints detailed in the paper.
+The vector z is the method's point vector estimate. It satisfies the symmetry-breaking constraints detailed in the paper.
 
