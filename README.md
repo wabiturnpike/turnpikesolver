@@ -30,6 +30,10 @@ After installing, run the following to run our synthetic simulations:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> cd ../turnpike-solver-tests </code></pre>
 
+5. Run the experiment script:
+<button id="copyButton"></button>
+<pre><code id="codeBlock"> ./run-synthetic.sh </code></pre>
+
 
 
 
