@@ -39,9 +39,9 @@ Once you have the prerequisites installed, follow these steps to set up the Turn
 
 ## Running the Tests
 
-After installing, run the following to run our synthetic simulations:
+After installing, you can run our experiments with the following:
 
-4. Go back to the root directory and change directory to turnpike-solver-tests:
+4. Change directory to turnpike-solver-tests:
 <button id="copyButton"></button>
 <pre><code id="codeBlock"> cd ../turnpike-solver-tests </code></pre>
 
