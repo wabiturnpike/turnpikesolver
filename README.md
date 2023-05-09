@@ -57,7 +57,7 @@ You only need one thing to use the solver: a distance set. It is helpful to have
 To solve a Turnpike instance,
 
 <button id="copyButton">Copy</button>
-<pre><code id="codeBlock">from worker import solve 
+<pre><code id="codeBlock">from TurnpikeMM.worker import solve 
 z = solve(d, uncertainty)
 </code></pre>
 
